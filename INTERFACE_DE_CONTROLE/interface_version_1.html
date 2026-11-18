@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Contrôle du Bras Robotisé</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+</head>
+<body class="bg-light">
+
+  <div id="login" class="container text-center mt-5">
+    <h2 class="mb-4">Connexion</h2>
+    <input type="password" id="password" class="form-control w-50 mx-auto mb-3" placeholder="Mot de passe">
+    <button class="btn btn-primary btn-lg" onclick="login()"><i class="fas fa-sign-in-alt"></i> Se connecter</button>
+  </div>
+
+  <div id="control" class="container mt-4" style="display:none;">
+    <div id="status" class="alert alert-info text-center mb-4">
+      État du robot : en attente...
+    </div>
+
+    <h2 class="text-center mb-4">Interface de Commande</h2>
+
+    <div class="row mb-3 justify-content-center">
+      <div class="col-auto">
+        <button id="startBtn" class="btn btn-success btn-lg mx-3" onclick="sendCommand('START')">
+          <i class="fas fa-play"></i> DÉMARRER
+        </button>
+      </div>
+      <div class="col-auto">
+        <button id="stopBtn" class="btn btn-secondary btn-lg mx-3" onclick="sendCommand('STOP')">
+          <i class="fas fa-stop"></i> ARRÊTER
+        </button>
+      </div>
+    </div>
+
+    <div class="row mb-3 justify-content-center">
+      <div class="col-auto">
+        <button class="btn btn-warning btn-lg mx-3" onclick="sendCommand('GAUCHE')">
+          <i class="fas fa-arrow-left"></i> GAUCHE
+        </button>
+      </div>
+      <div class="col-auto">
+        <button class="btn btn-warning btn-lg mx-3" onclick="sendCommand('DROITE')">
+          <i class="fas fa-arrow-right"></i> DROITE
+        </button>
+      </div>
+    </div>
+
+    <div class="row mb-3 justify-content-center">
+      <div class="col-auto">
+        <button class="btn btn-primary btn-lg mx-3" onclick="sendCommand('MONTER')">
+          <i class="fas fa-arrow-up"></i> MONTER
+        </button>
+      </div>
+      <div class="col-auto">
+        <button class="btn btn-primary btn-lg mx-3" onclick="sendCommand('DESCENDRE')">
+          <i class="fas fa-arrow-down"></i> DESCENDRE
+        </button>
+      </div>
+    </div>
+
+    <div class="row mb-3 justify-content-center">
+      <div class="col-auto">
+        <button class="btn btn-info btn-lg mx-3" onclick="sendCommand('ATTRAPER')">
+          <i class="fas fa-hand-rock"></i> ATTRAPER
+        </button>
+      </div>
+      <div class="col-auto">
+        <button class="btn btn-info btn-lg mx-3" onclick="sendCommand('RELACHER')">
+          <i class="fas fa-hand-paper"></i> RELACHER
+        </button>
+      </div>
+    </div>
+    <div class=" row mb-3 justify-content-center">
+        <button class="btn btn-warning btn-lg px-4" onclick="sendCommand('RETOUR')">
+          <i class="fas fa-exclamation-triangle"></i> INITIALISATION
+        </button>
+    </div>
+    <div class="text-end mt-4">
+      <button class="btn btn-danger btn-lg px-4" onclick="sendCommand('URGENCE')">
+        <i class="fas fa-exclamation-triangle"></i> URGENCE
+      </button>
+    </div>
+  </div>
+
+  <script>
+    let mqttClient;
+
+    function login() {
+      let pwd = document.getElementById("password").value;
+      if (pwd === "jiovani@bras||randy&robot") {
+        document.getElementById("login").style.display = "none";
+        document.getElementById("control").style.display = "block";
+
+        mqttClient = mqtt.connect("ws://192.168.96.197:8083/mqtt", {
+          username: "testuser",
+          password: "testpass",
+          protocolVersion: 4,
+          reconnectPeriod: 2000
+        });
+
+        mqttClient.on("connect", () => {
+          console.log("Connecté au broker MQTT");
+          mqttClient.subscribe("esp32/robot/state");
+        });
+
+        mqttClient.on("message", (topic, message) => {
+          if (topic === "esp32/robot/state") {
+            let etat = message.toString();
+            document.getElementById("status").className = "alert alert-success text-center";
+            document.getElementById("status").innerText = "État du robot : " + etat;
+          }
+        });
+
+        mqttClient.on("error", (err) => {
+          console.error("Erreur MQTT : ", err);
+          document.getElementById("status").className = "alert alert-danger text-center";
+          document.getElementById("status").innerText = "Erreur de connexion MQTT";
+        });
+      } else {
+        alert("Mot de passe incorrect !");
+      }
+    }
+
+    
+
+
+    function sendCommand(cmd) {
+      if (cmd === "START") {
+        document.getElementById("startBtn").classList.add("active");
+        document.getElementById("stopBtn").classList.remove("active");
+      } else if (cmd === "STOP") {
+        document.getElementById("stopBtn").classList.add("active");
+        document.getElementById("startBtn").classList.remove("active");
+      }
+
+      if (mqttClient && mqttClient.connected) {
+        mqttClient.publish("esp32/robot/cmd", cmd);
+        document.getElementById("status").className = "alert alert-warning text-center";
+        document.getElementById("status").innerText = "Commande envoyée : " + cmd;
+      } else {
+        document.getElementById("status").className = "alert alert-danger text-center";
+        document.getElementById("status").innerText = "Client MQTT non connecté";
+      }
+    }
+  
+</script>
+
+</body>
+</html>
