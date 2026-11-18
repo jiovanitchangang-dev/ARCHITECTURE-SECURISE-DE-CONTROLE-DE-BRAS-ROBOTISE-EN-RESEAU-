@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bras Robotisé — Panneau de Contrôle</title>
+
+  <!-- =====================================================
+       CONFIGURATION DU BROKER MQTT ET MOT DE PASSE
+       ===================================================== -->
+  <script>
+    const MQTT_HOST     = "192.168.96.197";   // IP du broker MQTT
+    const MQTT_WS_PORT  = 8083;               // Port WebSocket du broker 
+    const MQTT_USER     = "testuser";
+    const MQTT_PASS     = "testpass";
+    const MQTT_CMD_TOPIC   = "esp32/robot/cmd";    // Topic commandes → ESP32
+    const MQTT_STATE_TOPIC = "esp32/robot/state";  // Topic état   ← ESP32
+    const LOGIN_PASSWORD   = "jiovani@bras||randy&robot"; // Mot de passe d'accès
+  </script>
+
+  <!-- MQTT.js via CDN -->
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
+  <style>
+    /* ===================== VARIABLES ===================== */
+    :root {
+      --bg:        #0d0f14;
+      --panel:     #161a23;
+      --border:    #252b3b;
+      --accent:    #00e5ff;
+      --accent2:   #ff4d6d;
+      --accent3:   #ffe600;
+      --text:      #e8eaf0;
+      --muted:     #5a6278;
+      --success:   #00c896;
+      --danger:    #ff4d6d;
+      --warning:   #ffe600;
+      --font-mono: 'Share Tech Mono', monospace;
+      --font-ui:   'Rajdhani', sans-serif;
+    }
+
+    @import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600;700&family=Share+Tech+Mono&display=swap');
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-ui);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow-x: hidden;
+    }
+
+    /* --------- GRILLE DE FOND --------- */
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background-image:
+        linear-gradient(rgba(0,229,255,0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,229,255,0.04) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ===================== LOGIN ===================== */
+    #login-screen {
+      position: relative; z-index: 10;
+      display: flex; flex-direction: column; align-items: center;
+      gap: 20px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-top: 3px solid var(--accent);
+      padding: 50px 60px;
+      box-shadow: 0 0 60px rgba(0,229,255,0.08);
+    }
+
+    .login-title {
+      font-size: 1.8rem;
+      font-weight: 700;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      color: var(--accent);
+      text-shadow: 0 0 20px rgba(0,229,255,0.5);
+    }
+
+    .login-sub {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: var(--muted);
+      letter-spacing: 2px;
+    }
+
+    .login-input {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-bottom: 2px solid var(--accent);
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 1.1rem;
+      padding: 12px 20px;
+      width: 280px;
+      outline: none;
+      text-align: center;
+      letter-spacing: 6px;
+      transition: border-color .2s, box-shadow .2s;
+    }
+    .login-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 4px 20px rgba(0,229,255,0.15);
+    }
+
+    .btn-login {
+      background: var(--accent);
+      color: var(--bg);
+      border: none;
+      font-family: var(--font-ui);
+      font-weight: 700;
+      font-size: 1rem;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      padding: 14px 48px;
+      cursor: pointer;
+      transition: transform .15s, box-shadow .15s;
+    }
+    .btn-login:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(0,229,255,0.3);
+    }
+    .btn-login:active { transform: translateY(0); }
+
+    /* ===================== PANNEAU PRINCIPAL ===================== */
+    #control-panel {
+      display: none;
+      position: relative; z-index: 10;
+      width: min(960px, 96vw);
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-top: 3px solid var(--accent);
+      padding: 32px;
+      box-shadow: 0 0 80px rgba(0,229,255,0.06);
+    }
+
+    /* --- En-tête --- */
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 28px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    .header-title {
+      font-size: 1.4rem;
+      font-weight: 700;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+    }
+    .header-title span { color: var(--accent); }
+
+    /* --- Indicateur MQTT --- */
+    .mqtt-status {
+      display: flex; align-items: center; gap: 8px;
+      font-family: var(--font-mono); font-size: .75rem;
+      color: var(--muted);
+    }
+    .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--muted);
+      transition: background .3s, box-shadow .3s;
+    }
+    .dot.connected    { background: var(--success); box-shadow: 0 0 8px var(--success); }
+    .dot.disconnected { background: var(--danger);  box-shadow: 0 0 8px var(--danger);  }
+
+    /* --- Bandeau d'état --- */
+    .status-bar {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      padding: 12px 20px;
+      margin-bottom: 28px;
+      font-family: var(--font-mono);
+      font-size: .85rem;
+      color: var(--muted);
+      transition: border-left-color .3s, color .3s;
+    }
+    .status-bar.ok      { border-left-color: var(--success); color: var(--success); }
+    .status-bar.warn    { border-left-color: var(--warning); color: var(--warning); }
+    .status-bar.error   { border-left-color: var(--danger);  color: var(--danger);  }
+
+    /* --- Grille des boutons --- */
+    .section-label {
+      font-family: var(--font-mono);
+      font-size: .65rem;
+      letter-spacing: 3px;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin-bottom: 12px;
+    }
+
+    .btn-grid {
+      display: grid;
+      gap: 12px;
+      margin-bottom: 28px;
+    }
+    .btn-grid-2 { grid-template-columns: 1fr 1fr; }
+    .btn-grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+
+    /* --- Boutons commande --- */
+    .cmd-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-family: var(--font-ui);
+      font-weight: 600;
+      font-size: .95rem;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      padding: 18px 12px;
+      cursor: pointer;
+      transition: background .15s, border-color .15s, color .15s, transform .1s, box-shadow .15s;
+      display: flex; align-items: center; justify-content: center; gap: 10px;
+    }
+    .cmd-btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: rgba(0,229,255,0.05);
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(0,229,255,0.1);
+    }
+    .cmd-btn:active { transform: translateY(0); }
+    .cmd-btn:disabled { opacity: .3; cursor: not-allowed; pointer-events: none; }
+
+    .cmd-btn.start  { border-color: var(--success); color: var(--success); }
+    .cmd-btn.start:hover  { background: rgba(0,200,150,0.08); box-shadow: 0 6px 20px rgba(0,200,150,0.1); }
+    .cmd-btn.stop   { border-color: var(--muted);   color: var(--muted); }
+    .cmd-btn.active { background: rgba(0,229,255,0.12); border-color: var(--accent); color: var(--accent); }
+
+    /* --- Bouton URGENCE --- */
+    .emergency-zone {
+      border-top: 1px solid var(--border);
+      padding-top: 24px;
+      text-align: right;
+    }
+    .btn-emergency {
+      background: transparent;
+      border: 2px solid var(--danger);
+      color: var(--danger);
+      font-family: var(--font-ui);
+      font-weight: 700;
+      font-size: 1rem;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      padding: 18px 40px;
+      cursor: pointer;
+      transition: background .15s, box-shadow .15s, transform .1s;
+    }
+    .btn-emergency:hover {
+      background: rgba(255,77,109,0.1);
+      box-shadow: 0 0 30px rgba(255,77,109,0.3);
+      transform: scale(1.02);
+    }
+    .btn-emergency:active { transform: scale(1); }
+
+    /* --- Animation pulse sur urgence active --- */
+    @keyframes pulse-red {
+      0%,100% { box-shadow: 0 0 10px rgba(255,77,109,0.3); }
+      50%      { box-shadow: 0 0 30px rgba(255,77,109,0.8); }
+    }
+    .btn-emergency.active {
+      background: rgba(255,77,109,0.15);
+      animation: pulse-red 1s infinite;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ===== ÉCRAN DE CONNEXION ===== -->
+  <div id="login-screen">
+    <div class="login-title">&#9651; ROBOT ARM</div>
+    <div class="login-sub">// ACCÈS SÉCURISÉ REQUIS</div>
+    <input
+      class="login-input"
+      type="password"
+      id="pwd-input"
+      placeholder="••••"
+      onkeydown="if(event.key==='Enter') login()"
+    >
+    <button class="btn-login" onclick="login()">CONNEXION</button>
+  </div>
+
+  <!-- ===== PANNEAU DE CONTRÔLE ===== -->
+  <div id="control-panel">
+
+    <!-- En-tête -->
+    <div class="header">
+      <div class="header-title">BRAS <span>ROBOTISÉ</span> — CONTRÔLE</div>
+      <div class="mqtt-status">
+        <div class="dot disconnected" id="mqtt-dot"></div>
+        <span id="mqtt-label">MQTT déconnecté</span>
+      </div>
+    </div>
+
+    <!-- Bandeau d'état -->
+    <div class="status-bar" id="status-bar">
+      &gt; En attente de connexion au broker...
+    </div>
+
+    <!-- SECTION : Système -->
+    <div class="section-label">// Système</div>
+    <div class="btn-grid btn-grid-2">
+      <button class="cmd-btn start" id="btn-start" onclick="sendCmd('START')">
+        ▶ DÉMARRER
+      </button>
+      <button class="cmd-btn stop" id="btn-stop" onclick="sendCmd('STOP')">
+        ■ ARRÊTER
+      </button>
+    </div>
+
+    <!-- SECTION : Rotation base -->
+    <div class="section-label">// Rotation base</div>
+    <div class="btn-grid btn-grid-2">
+      <button class="cmd-btn" onclick="sendCmd('GAUCHE')">← GAUCHE</button>
+      <button class="cmd-btn" onclick="sendCmd('DROITE')">DROITE →</button>
+    </div>
+
+    <!-- SECTION : Axe vertical -->
+    <div class="section-label">// Axe vertical</div>
+    <div class="btn-grid btn-grid-2">
+      <button class="cmd-btn" onclick="sendCmd('MONTER')">↑ MONTER</button>
+      <button class="cmd-btn" onclick="sendCmd('DESCENDRE')">↓ DESCENDRE</button>
+    </div>
+
+    <!-- SECTION : Pince -->
+    <div class="section-label">// Pince</div>
+    <div class="btn-grid btn-grid-2">
+      <button class="cmd-btn" onclick="sendCmd('ATTRAPER')">✊ ATTRAPER</button>
+      <button class="cmd-btn" onclick="sendCmd('RELACHER')">✋ RELÂCHER</button>
+    </div>
+
+    <!-- URGENCE -->
+    <div class="emergency-zone">
+      <button class="btn-emergency" id="btn-urgence" onclick="sendCmd('URGENCE')">
+        ⚠ ARRÊT D'URGENCE
+      </button>
+    </div>
+
+  </div><!-- fin #control-panel -->
+
+  <!-- ===================== SCRIPT ===================== -->
+  <script>
+    let mqttClient = null;
+
+    /* ---------- LOGIN ---------- */
+    function login() {
+      const val = document.getElementById('pwd-input').value;
+      if (val !== LOGIN_PASSWORD) {
+        alert("Mot de passe incorrect !");
+        return;
+      }
+      document.getElementById('login-screen').style.display = 'none';
+      document.getElementById('control-panel').style.display = 'block';
+      connectMQTT();
+    }
+
+    /* ---------- CONNEXION MQTT via WebSocket ---------- */
+    function connectMQTT() {
+      const url = `ws://${MQTT_HOST}:${MQTT_WS_PORT}/mqtt`;
+      setStatus("Connexion MQTT en cours vers " + url + " ...", "");
+
+      mqttClient = mqtt.connect(url, {
+        username:        MQTT_USER,
+        password:        MQTT_PASS,
+        protocolVersion: 4,
+        reconnectPeriod: 3000,
+        connectTimeout:  5000
+      });
+
+      mqttClient.on('connect', () => {
+        setDot(true);
+        setStatus("> Connecté au broker MQTT — en attente de commandes", "ok");
+        mqttClient.subscribe(MQTT_STATE_TOPIC, (err) => {
+          if (err) console.warn("Abonnement échoué :", err);
+        });
+      });
+
+      mqttClient.on('message', (topic, message) => {
+        if (topic === MQTT_STATE_TOPIC) {
+          const txt = message.toString();
+          const isObstacle = txt.toLowerCase().includes('obstacle');
+          setStatus("> État ESP32 : " + txt, isObstacle ? "error" : "ok");
+        }
+      });
+
+      mqttClient.on('error', (err) => {
+        console.error("Erreur MQTT :", err);
+        setDot(false);
+        setStatus("> Erreur MQTT : " + err.message, "error");
+      });
+
+      mqttClient.on('offline', () => {
+        setDot(false);
+        setStatus("> MQTT hors-ligne — reconnexion...", "warn");
+      });
+
+      mqttClient.on('reconnect', () => {
+        setStatus("> Tentative de reconnexion MQTT...", "warn");
+      });
+    }
+
+    /* ---------- ENVOI DE COMMANDE ---------- */
+    function sendCmd(cmd) {
+      if (!mqttClient || !mqttClient.connected) {
+        setStatus("> ⚠ Client MQTT non connecté — commande ignorée", "error");
+        return;
+      }
+      mqttClient.publish(MQTT_CMD_TOPIC, cmd);
+      setStatus("> Commande envoyée : " + cmd, "warn");
+
+      // Feedback visuel boutons START/STOP
+      if (cmd === 'START') {
+        document.getElementById('btn-start').classList.add('active');
+        document.getElementById('btn-stop').classList.remove('active');
+        document.getElementById('btn-urgence').classList.remove('active');
+      } else if (cmd === 'STOP') {
+        document.getElementById('btn-stop').classList.add('active');
+        document.getElementById('btn-start').classList.remove('active');
+        document.getElementById('btn-urgence').classList.remove('active');
+      } else if (cmd === 'URGENCE') {
+        document.getElementById('btn-urgence').classList.add('active');
+        document.getElementById('btn-start').classList.remove('active');
+        document.getElementById('btn-stop').classList.remove('active');
+      }
+    }
+
+    /* ---------- HELPERS UI ---------- */
+    function setStatus(msg, type) {
+      const el = document.getElementById('status-bar');
+      el.textContent = msg;
+      el.className = 'status-bar ' + (type || '');
+    }
+
+    function setDot(connected) {
+      const dot   = document.getElementById('mqtt-dot');
+      const label = document.getElementById('mqtt-label');
+      dot.className   = 'dot ' + (connected ? 'connected' : 'disconnected');
+      label.textContent = connected ? 'MQTT connecté' : 'MQTT déconnecté';
+    }
+  </script>
+
+</body>
+</html>
